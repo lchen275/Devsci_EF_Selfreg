@@ -1,0 +1,666 @@
+---
+title: "HTKS EF Devsci analysis"
+output:
+ bookdown::html_document2:
+    toc: yes
+    number_sections: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, include=FALSE }
+library(conflicted)
+
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("as_factor", "sjlabelled")
+conflict_prefer("corrplot", "corrplot")
+conflict_prefer("standardize", "jtools")
+conflict_prefer("cor_pmat", "rstatix")
+
+libs = c('haven',
+         'ggthemes','sjlabelled','patchwork', 'kableExtra','knitr','lme4','bookdown','generics','lubridate', 'nnet', 'foreign', 'sjPlot', 'ggeffects', 'sjmisc', 'VGAM', 'merTools', 'lmtest', 'glmmTMB', 'ggstance', 'gtsummary', 'ggforce', 'jtools', 'performance', 'see', 'arm', 'naniar','table1' ,'MuMIn', 'ggplot2', 'tidyverse', 'Hmisc', 'psych', 'RColorBrewer', 'ggpubr', 'rockchalk', 'corrplot', 'retrodesign', 'ggcorrplot', 'rstatix', 'olsrr') 
+
+invisible(lapply(libs,library, character.only=T))
+
+```
+
+```{r importdata, include=FALSE }
+
+DFsmall = readRDS('data/cleaneddata_shared-code.rds')
+
+```
+
+
+# Methods
+
+## Table 1. Participant sample details, including age, BMI, years of schooling, and compulsory start age of school.
+
+```{r tblsummary}
+
+DFsmall %>%
+  select(location, Sex = sex, Age = age_yr2, BMI = bmi, 'Years of Schooling' = edu_exposure) %>%
+  gtsummary::tbl_summary(
+    by = location, 
+    statistic = c(Age, BMI, 'Years of Schooling') ~ "{mean} ({sd}) {min} - {max}",
+    digits = c(Age, BMI, 'Years of Schooling') ~ 2,
+    missing_text = "(Missing)"
+  )
+
+```
+
+Compulsory years of schooling were added manually for each fieldsite in this table.
+
+# Results
+
+## *Summary Stats*
+
+### Table 3.  Scores on the HTKS, Knox Cube, and Beads Tasks by site.
+
+```{r descriptives tasks, echo = FALSE}
+DFsmall %>%
+  select(location, 'HTKS All' = HTKS_all, 'HTKS I & II' = HTKS_i_ii, 'Knox Cube' = knox_total, 'Beads' = beads_total) %>%
+  gtsummary::tbl_summary(
+    by = location, 
+    type = list('HTKS All' ~ 'continuous2'),
+    statistic = list(c('HTKS All') ~ c("{mean} ({sd})", "{median}"),
+                     c('HTKS I & II', 'Knox Cube', 'Beads') ~ "{mean} ({sd})"), 
+    digits = c('HTKS All','HTKS I & II', 'Knox Cube', 'Beads') ~ 2,
+    missing_text = "(Missing)"
+    ) %>% 
+  add_overall()
+  
+```
+
+### Figures 2a and 2b: Violin plots showing HTKS scores by study site. The dashed line represents the maximum possible score.
+
+```{r ceiling plots, echo= FALSE}
+#Create violin plot of HTKS scores (parts I, II, and III)
+plot5 <- DFsmall %>%
+  ggplot(aes(x=location, y=HTKS_all, fill=location)) +
+    geom_violin() +
+    geom_jitter(color="black", size=1, alpha=0.9) +
+     theme_classic() +
+    theme(
+      plot.title = element_text(size=11)
+    ) +
+    ggtitle("HTKS (Parts I, II, & III) Scores by Site") +
+    xlab("") + ylab("HTKS Total Score") +
+   scale_fill_brewer(palette="RdBu") + 
+  geom_hline(yintercept=60, linetype = "dashed") +
+     labs(fill="Location")  +
+  ylim(-.05, 60.05)
+
+# Create violin plot of HTKS scores (parts I & II)
+plot5_1 <- DFsmall %>%
+  ggplot(aes(x=location, y=HTKS_i_ii, fill=location)) +
+    geom_violin() +
+    geom_jitter(color="black", size=1, alpha=0.9) +
+     theme_classic() +
+    theme(
+      plot.title = element_text(size=11)
+    ) +
+    ggtitle("HTKS (Parts I & II) Scores by Site") +
+    xlab("") + ylab("HTKS Total Score") +
+   scale_fill_brewer(palette="RdBu") + 
+  geom_hline(yintercept=40, linetype = "dashed") +
+     labs(fill="Location") +
+  ylim(-.05, 60.05) # Keep same y limits as first plot for comparison
+
+# Combine plots side by side
+plot_5_5_1 <- ggarrange(plot5, plot5_1, common.legend = TRUE, legend = "none", labels = c("A", "B"))
+
+plot_5_5_1
+```
+
+Lets look at a scatter plot matrix for our most important variables
+
+### Table 4. Results of five one-way ANOVAs for site-level differences in variables.
+
+```{r ANOVAs}
+
+anova_bmi <- aov(bmi ~ location, data = DFsmall)
+summary(anova_bmi)
+anova_age <- aov(age_yr ~ location, data = DFsmall)
+summary(anova_age)
+anova_edu <- aov(edu_exposure ~ location, data = DFsmall)
+summary(anova_edu)
+anova_knox <- aov(knox_total_z ~ location, data = DFsmall)
+summary(anova_knox)
+anova_beads <- aov(beads_total_z ~ location, data = DFsmall)
+summary(anova_beads)
+
+#Combining outputs together in a table
+anova_sum <- rbind(
+anova_summary(anova_bmi),
+anova_summary(anova_age),
+anova_summary(anova_edu),
+anova_summary(anova_knox),
+anova_summary(anova_beads)) %>% select(-c('p<.05','ges')) %>% as.data.frame()
+
+# Replace effect column with correct effect names
+anova_sum$IV <- as.character(c('BMI (m/kg^2)','Age (years)','Years of Schooling (years)', 'Knox Cube Score (z-scored)','Beads Score (z-scored)')) # Create column naming independent variable
+anova_sum <- anova_sum %>% 
+  select(IV,DFn, DFd, F, p) %>% 
+  kable(.) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) 
+
+# Print table
+anova_sum
+```
+
+### Table 5. Summary of Tukey’s HSD posthoc tests for demographic and cognitive variables and location.
+
+Because all of our demographic/cognitive variables are significantly different by site (see Table 4 anovas), we're running posthoc tests (Tukey's HSD) to review specific site-site differences.
+
+Posthoc results were combined into a single table by hand to maximize efficient use of space. Here, we will show full results of each posthoc test, including confidence intervals, for each ANOVA.
+
+Tukey's HSD - BMI:
+```{r Tukey}
+TukeyHSD(anova_bmi)
+```
+
+Tukey's HSD - Age:
+```{r}
+TukeyHSD(anova_age)
+```
+
+Tukey's HSD - Years of Schooling:
+```{r}
+TukeyHSD(anova_edu)
+```
+
+Tukey's HSD - Knox Score:
+```{r}
+TukeyHSD(anova_knox)
+```
+
+Tukey's HSD - Beads Scores:
+```{r}
+TukeyHSD(anova_beads)
+```
+
+
+### Figures 3a-d. Site-level distributions of years of schooling and task scores (HTKS, Knox Cube, and Beads).
+```{r score plots by location, echo= FALSE}
+# Generate HTKS scores by site plot
+plot_01 <- DFsmall %>%
+ ggplot(aes(x=location, y=HTKS_all, fill=location)) +
+    geom_boxplot() +
+    #geom_jitter(color="black", size=1, alpha=0.9) +
+     theme_classic() +
+    theme(
+     plot.title = element_text(size=11),
+     axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()
+    ) +
+    ggtitle("HTKS Scores by Site") +
+    xlab("") + ylab("HTKS Total Score") +
+   scale_fill_brewer(palette="RdBu") +
+     labs(fill="Location")
+
+# Generate years of schooling by site plot
+plot_01_01 <- DFsmall %>%
+ ggplot(aes(x=location, y=yrs_school, fill=location)) +
+    geom_boxplot() +
+    #geom_jitter(color="black", size=1, alpha=0.9) +
+     theme_classic() +
+    theme(
+     plot.title = element_text(size=11),
+     axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()
+    ) +
+    ggtitle("Years of Schooling by Site") +
+    xlab("") + ylab("Years of Schooling") +
+   scale_fill_brewer(palette="RdBu") +
+     labs(fill="Location")
+
+# Generate beads scores by site plot
+plot_02 <- DFsmall %>%
+ ggplot(aes(x=location, y=beads_total, fill=location)) +
+    geom_boxplot() +
+    #geom_jitter(color="black", size=1, alpha=0.9) +
+     theme_classic() +
+    theme(
+     plot.title = element_text(size=11),
+     axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()
+    ) +
+    ggtitle("Beads Score by Site") +
+    xlab("") + ylab("Beads Score") +
+   scale_fill_brewer(palette="RdBu") +
+     labs(fill="Location")
+
+# Generate knox scores by site plot
+plot_03 <- DFsmall %>%
+ ggplot(aes(x=location, y=knox_total, fill=location)) +
+    geom_boxplot() +
+    #geom_jitter(color="black", size=1, alpha=0.9) +
+  theme_classic() +
+    theme(
+     plot.title = element_text(size=11),
+     axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+    ggtitle("Knox Cube Score by Site") +
+    ylab("Knox Cube Score") +
+   scale_fill_brewer(palette="RdBu") +
+     labs(fill="Location")
+
+# Combine 4 plots
+combined_plot = ggarrange(plot_01_01, #yrs of school on first row
+          ggarrange(plot_01, plot_02, plot_03, ncol = 3, labels = c("B", "C", "D"), legend = "none"), # HTKS, beads, and knox plots on second row
+          nrow = 2, 
+          labels = "A"   
+          ) 
+
+# Print plot
+combined_plot
+```
+
+## *Is there a relationship between HTKS performance and EFs (as measured by the Knox Cube and Beads Tasks) across all sites?*
+
+### Figure 4. Pearson Correlations for HTKS, Knox Cube Task, and Beads Task scores.
+
+
+Here we create the correlation matrix:
+
+
+```{r correlation mat, fig.height=5, fig.width=5}
+#Select only continuous variables for correlation analysis
+dfcorrs = DFsmall %>% select(HTKS_all,HTKS_i_ii, knox_total, beads_total, edu_exposure, age_yr, bmi) %>% drop_na()
+
+colnames(dfcorrs) <- c('HTKS all','HTKS I & II', 'Knox Cube Total', 'Beads Total', 'Years of Schooling','Age', 'BMI') #Names of columns to be used in plots
+
+
+dfcorrs.rcorr = rcorr(as.matrix(dfcorrs)) #Create correlation matrix
+
+dfcorrs.coeff = dfcorrs.rcorr$r #Save corr coefficients
+dfcorrs.p = dfcorrs.rcorr$P #Save corr p-values
+
+
+grey <- adjustcolor("#696969", alpha.f = 0.6) #Create grey with adjusted opacity
+
+#Make correlation plot
+corrplot(dfcorrs.coeff, 
+         method = "circle", 
+         type = "lower", 
+         title = "Correlation Matrix of Continuous Variables", mar=c(0,0,2,0), 
+         p.mat = dfcorrs.p, addCoef.col = "black", #Add significance values
+         insig = "pch", pch = 4, pch.col = grey, pch.cex = 2, #Add x's to insignificant correlations
+         tl.col = "black", tl.pos = "ld") #Position/color for text labels
+```
+
+### Figure 5a & b. Scatterplots of Knox Cube and Beads scores against HTKS scores, respectively.
+
+```{r scatterplots varying slopes knox}
+#Create plot 5a
+plot3 = ggplot(DFsmall, aes(knox_total, HTKS_all, color=location)) +
+  stat_smooth(method="glm", family = binomial, formula=y~x,
+              alpha=0.2, size=2, aes(fill=location)) +
+  geom_point(position=position_jitter(height=0.02, width=0.02),size=3, alpha=0.3) +
+  coord_cartesian(ylim = c(19.95, 60.05), , xlim = c(-.05, 15.05))+
+  theme_minimal()+  
+  ylab("HTKS Total (out of 60)") +
+  xlab("Knox Cube Total (out of 15)") +
+  theme(axis.title = element_text(angle = 90, vjust = -0.075),
+        axis.title.x = element_text(angle = 0, size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 20, face = "bold"))+
+  theme(strip.text.x = element_text(size = 18, colour = "black", angle = 0),
+        strip.text.y = element_text(size = 18, colour = "black", angle = 270)) +
+  scale_color_brewer(palette="RdBu")
+```
+
+```{r scatterplots varying slopes beads}
+#Create plot 5b
+plot4 = ggplot(DFsmall, aes(beads_total, HTKS_all, color=location)) +
+  stat_smooth(method="glm", family = binomial, formula=y~x,
+              alpha=0.2, size=2, aes(fill=location)) +
+  geom_point(position=position_jitter(height=0.02, width=0.02),size=3, alpha=0.3) +
+  coord_cartesian(ylim = c(19.95, 60.05), , xlim = c(-.05, 10.05))+
+  theme_minimal()+  
+  ylab("HTKS Total (out of 60)") +
+  xlab("Beads Total (out of 10)") +
+  theme(axis.title = element_text(angle = 90, vjust = -0.075),
+        axis.title.x = element_text(angle = 0, size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 20, face = "bold"))+
+  theme(strip.text.x = element_text(size = 18, colour = "black", angle = 0),
+        strip.text.y = element_text(size = 18, colour = "black", angle = 270)) +
+  scale_color_brewer(palette="RdBu")
+```
+
+```{r combined_beads knox and htks, fig.height = 5, fig.width = 10}
+# Combine plots 5a & b
+plot_3_4 <- ggarrange(plot3, plot4, common.legend = TRUE, legend = "right", labels = c("A", "B"))
+plot_3_4
+```
+
+
+### Table 6. Results of the full model of independent variables and HTKS scores
+
+*Is there a relationship between HTKS performance and EFs (as measured by the Knox and Beads tasks) in our overall sample?*
+
+We'll first run the full model to answer this question. Here, we're running the model itself first.
+
+```{r full model}
+#Run full model
+mboth = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + beads_total_z + knox_total_z,  data=DFsmall, na.action = na.fail) 
+```
+
+#### Check assumptions
+
+Now, we'll check the assumption - resid plots, VIFs, and formal test for heteroskedasticity with the studentized Breusch-Pagan test.
+
+```{r full model checks}
+#Residual and Q-Q plot
+par(mfrow=c(2,2)) # init 4 charts in 1 panel
+plot(mboth)
+
+#Check variance inflation factors for parameters
+car::vif(mboth)
+
+#BP test
+bptest(mboth)
+```
+
+Looks like VIFs all look good, ranging from 1-1.6, so no concerns there.
+
+The residual plot does look to be heteroskedastic, which is confirmed by a BP test. To account for this, we will calculate robust standard errors and confidence intervals.
+
+```{r full model summary}
+#Model parameters, where SE, CI and p-values are based on robust estimation
+tab_model(mboth, vcov.fun = "HC", show.se = TRUE)
+
+#Calculate AICc score
+MuMIn::AICc(mboth)
+```
+
+### Table 7. Best fit model of independent variables and HTKS scores
+
+This section is running a model selection process from all possible parameter combinations. This did not include interaction terms - interactions of interest are examined later.
+
+```{r model selection with mumin}
+# run model selection by AICc
+model_sel <- dredge(mboth) #dredge from full model
+
+# Show top 10 models
+model_sel[1:10]
+
+# Pull best fitting model
+best_model <- get.models(model_sel, subset = 1)[[1]]
+```
+
+#### Check assumptions
+
+Like above, we'll check resid plots, VIFs, and test for heteroskedasticity with the studentized Breusch-Pagan test.
+
+```{r best model checks}
+#Residual and Q-Q plot
+par(mfrow=c(2,2)) # init 4 charts in 1 panel
+plot(best_model)
+
+#Check variance inflation factors for parameters
+car::vif(best_model)
+
+#BP test
+bptest(best_model)
+```
+
+Looks like heteroskedasticity is also a problem here, so we will calculate robust standard errors.
+
+```{r best model summary}
+#Model summary table
+tab_model(best_model, vcov.fun = "HC", show.se = TRUE)
+
+#Calculate aicc
+MuMIn::AICc(mboth)
+```
+
+## *Does formal education impact the relationship between HTKS and EF tasks?*
+
+### Figure 6. Comparison of full model and years of schooling moderation effect models.
+
+Running a moderation analysis to assess years of schooling as a moderator of location effects, Knox Cube, or Beads effect
+
+```{r}
+
+#Interactions - yrs school and location
+mboth_int_loc = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + yrs_school_c*location + beads_total_z + knox_total_z,  data=DFsmall)
+car::vif(mboth_int_loc)
+tab_model(mboth_int_loc)
+
+#Interactions - yrs school and knox
+mboth_int_knox = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + beads_total_z + knox_total_z + yrs_school_c*knox_total_z,  data=DFsmall)
+car::vif(mboth_int_knox)
+tab_model(mboth_int_knox)
+
+#Interactions - yrs school and beads
+mboth_int_beads = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + beads_total_z + knox_total_z + yrs_school_c*beads_total_z,  data=DFsmall)
+car::vif(mboth_int_beads)
+tab_model(mboth_int_beads)
+
+#Check AICc values for all 3 interaction models
+MuMIn::AICc(mboth_int_loc, mboth_int_knox, mboth_int_beads)
+```
+
+Below display the interaction models against the full model to check for differences in effects. Effects are unmoderated by years of schooling (see how little effects change across all models).
+
+```{r coefplot, fig.cap='Plots of coefficients for each of the four models compared in this analysis. Each model is a linear regression with normal errors.', fig.height=7, fig.width=9}
+# To visually display the coefficients from main and interaction models at once 
+
+coef.names <- c("Age"="age_yr_c", "Sex:M"="sexm","BMI"="bmi","Years of Schooling"="yrs_school_c",
+                 "Loc:Ghana"="locationGhana","Loc:Vanuatu"="locationVanuatu", 
+                "Loc:Malaysia"="locationMalaysia", "Beads Score"="beads_total_z",
+                "Knox Cube Score"="knox_total_z","Years of School*Loc:Ghana"="yrs_school_c:locationGhana",
+              "Years of School*Loc:Vanuatu"= "yrs_school_c:locationVanuatu",
+              "Years of School*Loc:Malaysia"= "yrs_school_c:locationMalaysia", 
+               "Years of School*Knox Cube"= "yrs_school_c:knox_total_z",
+              "Years of School*Beads"= "yrs_school_c:beads_total_z")
+                
+mod_regression_plot <- plot_summs(mboth, mboth_int_loc, mboth_int_knox, mboth_int_beads, 
+                                  exp = FALSE, 
+                                  model.names = c('Full Model', 'Add Years of School*Location',
+                                                  'Add Years of School*Knox', 
+                                                  'Add Years of School*Beads,'), 
+                                  coefs = coef.names, 
+                                  point.shape = FALSE,
+                                  robust = TRUE)  + 
+  theme_minimal() + 
+  labs(x = "Coefficient", y = 'Variable', title = 'Comparison of Moderation Models') + 
+  scale_shape_manual(values=c(20,20,20,20), guide = FALSE) +
+  scale_color_brewer(palette="RdBu")
+
+mod_regression_plot
+```
+
+## *Effect of experimental variation in task environment and administration?*
+
+### Table 8. Linear model results examining the number of practice trials and HTKS performance
+
+```{r exp variation trials, echo=FALSE}
+#Total practice trials
+DFsmall = DFsmall %>%
+ mutate(
+    HTKS_practice = as_numeric(part_i_pr+part_ii_pr+part_iii_pr))
+
+# Model practice trials predicting HTKS
+practice_model <- lm(HTKS_all ~ HTKS_practice, DFsmall)
+tab_model(practice_model)
+
+```
+
+Looks like the practice trials aren't an influence on HTKS scores from this model, so we won't worry about them.
+
+### Figures 7a & 7b. Background noise level and EF task scores across sites
+
+Background noise was rated as 0,1,2 by coders. 0 = silent/lab-like setting 1 = intermittent noise or constant low level noise 2 = loud background noise (yelling, lots of talking, etc.)
+
+To look at whether the EF task totals are different based on background noise levels, we'll look at the data and run an ANOVA for the Knox task total score and the Beads Task total score.
+
+```{r exp variation noise, echo=FALSE}
+#Background noise and EF scores
+
+# Compute the analysis of variance for knox
+res.aov_knox <- aov(knox_total ~ back_noise_knox, data = DFsmall)
+# Summary of the analysis
+summary(res.aov_knox)
+
+# Compute the analysis of variance for bead
+res.aov_beads <- aov(beads_total ~ back_noise_beads, data = DFsmall)
+# Summary of the analysis
+summary(res.aov_beads)
+
+```
+
+Now we'll plot these:
+
+```{r exp variation noise boxplots, fig.height = 6, fig.width = 11, echo=FALSE}
+#Knox boxplots
+noise_knox <- DFsmall %>% filter(!is.na(back_noise_knox))
+noise_knox_boxplot <- ggplot(noise_knox, aes(x=back_noise_knox, y=knox_total, fill = back_noise_knox)) + 
+  geom_boxplot(show.legend = FALSE) +
+    #outlier.colour="black", outlier.shape=16, outlier.size=2, 
+    #notch=FALSE) + 
+  scale_fill_brewer(palette="RdBu") +
+  theme_classic() + ggtitle("Background Noise & Knox Cube Scores") +
+  ylab("Knox Cube Task Score (out of 15)") +
+  xlab("Background Noise Level")
+
+#Beads boxplots
+noise_beads <- DFsmall %>% filter(!is.na(back_noise_beads))
+noise_beads_boxplot <- ggplot(noise_beads, aes(x=back_noise_beads, y=beads_total, fill = back_noise_beads)) + 
+  geom_boxplot(show.legend = FALSE) +
+    scale_fill_brewer(palette="RdBu") +
+  theme_classic() + ggtitle("Background Noise & Beads Task Scores") +
+  ylab("Beads Task Score (out of 10)") +
+  xlab("Background Noise Level")
+
+#combine both for final figs
+plot_noise_comb <- ggarrange(noise_knox_boxplot, noise_beads_boxplot, labels = c("A", "B"))
+plot_noise_comb
+```
+
+Looks like there isn't significant differences between the groups here, which makes sense based on the visuals. Note there are quite a few missing values, particularly for the Knox Test (43).
+
+# Suppplemental Materials
+
+### Table Supp2. Comparisons of Linear Models
+
+### Figure Supp1. Residual graphs of Model 3 (HTKS score predicted by age, sex, BMI, years of schooling, Knox Cube Score, and Beads Score)
+
+```{r Supp1 full model qq plot}
+#Residual and Q-Q plot
+par(mfrow=c(2,2)) # init 4 charts in 1 panel
+plot(mboth)
+```
+
+### Table Supp3. Results of Model 1, including age, sex, BMI, and location variables
+
+Here and for each model below this we will output the main model table, GVIFs, and AICc
+
+```{r Supp3 Model 1 base table}
+
+# save model
+mbase <- lm(HTKS_all ~ age_yr_c + sex + bmi_c + location,  data=DFsmall)
+
+# output table w/ robust SE
+tab_model(mbase, vcov.fun = "HC", show.se = TRUE)
+
+# VIF/GVIFs
+car::vif(mbase)
+
+#Calculate aicc
+MuMIn::AICc(mbase)
+```
+
+### Table Supp4. Results of Model 2, including age, sex, BMI, years of schooling, and location variables
+
+```{r Supp4 Model 2 table}
+
+# save model
+mbase_sch <- mbase_sch <- lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location,  data=DFsmall)
+
+# output table w/ robust SE
+tab_model(mbase_sch, vcov.fun = "HC", show.se = TRUE)
+
+# VIF/GVIFs
+car::vif(mbase_sch)
+
+#Calculate aicc
+MuMIn::AICc(mbase_sch)
+```
+
+### Table Supp5. Results of Model 3, including age, sex, BMI, location, Knox Cube score, and Beads score variables.
+
+
+```{r Supp5 Model 3 table}
+
+# save model
+mbothns  = lm(HTKS_all ~ age_yr_c + sex + bmi_c + location + beads_total_z + knox_total_z,  data=DFsmall)
+
+# output table w/ robust SE
+tab_model(mbothns, vcov.fun = "HC", show.se = TRUE)
+
+# VIF/GVIFs
+car::vif(mbothns)
+
+#Calculate aicc
+MuMIn::AICc(mbothns)
+```
+
+### Table Supp6. Results of Model 5, including age, sex, BMI,years of schooling,location, and Knox Cube score variables
+
+```{r Supp6 Model 5 table}
+
+# save model
+mknox = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + knox_total_z,  data=DFsmall)
+
+# output table w/ robust SE
+tab_model(mknox, vcov.fun = "HC", show.se = TRUE)
+
+# VIF/GVIFs
+car::vif(mknox)
+
+#Calculate aicc
+MuMIn::AICc(mknox)
+```
+
+### Table Supp7. Results of Model 6, including age, sex, BMI, years of schooling, location, and Beads score variables.
+
+```{r Supp7 Model 6 table}
+
+# save model
+mbeads = lm(HTKS_all ~ age_yr_c + sex + bmi_c + yrs_school_c + location + beads_total_z,  data=DFsmall)
+
+# output table w/ robust SE
+tab_model(mbeads, vcov.fun = "HC", show.se = TRUE)
+
+# VIF/GVIFs
+car::vif(mbeads)
+
+#Calculate aicc
+MuMIn::AICc(mbeads)
+```
+### Table Supp8. Results of exploratory model selection process
+
+```{r model selection table}
+
+# Display top 10 models from 'dredge' w lowest AICc
+model_sel[1:10]
+```
+
