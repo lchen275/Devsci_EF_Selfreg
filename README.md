@@ -6,3 +6,5 @@ Reproducible analysis files for ["Examining relations between performance on non
 2. [data/cleaneddata_shared-code.csv](data/cleaneddata_shared-code.csv): CSV file of data, included for accessibility  
 3. [QTHTKS_shareable-code_LC.Rmd](QTHTKS_shareable-code_LC.Rmd): analysis rmd file  
 4. [QTHTKS_shareable-code_LC.html](QTHTKS_shareable-code_LC.html): analysis output file  
+
+To run this analysis: Download or fork this repo. Ensure clean data rds is located in 'data' folder in root folder. Knit rmd.
